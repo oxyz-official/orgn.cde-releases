@@ -69,12 +69,16 @@ RUN go install github.com/tomnomnom/assetfinder@latest \
  && go install github.com/ropnop/kerbrute@latest
 
 # ---------------------------------------------------------------------------
-# Stage 1b — build x8 (hidden-parameter discovery). No arm64 prebuilt binary is
-# published, and a plain `cargo install x8` breaks (cookie/time dependency
-# resolution). `--locked` uses x8's own Cargo.lock, which pins compatible deps.
+# Stage 1b — build x8 (hidden-parameter discovery). No arm64 prebuilt exists, and
+# x8 4.3.2's deps don't build on current rustc: unlocked hits a cookie/time arg
+# mismatch, --locked pins an old `time` that fails E0282 on rustc >= 1.80. Pin
+# rustc 1.79 (compiles the locked `time`) + --locked. Best-effort: if x8 ever
+# breaks upstream the image still ships (without x8) rather than failing the build.
 # ---------------------------------------------------------------------------
-FROM rust:1-bookworm AS x8build
-RUN cargo install x8 --locked --root /usr/local
+FROM rust:1.79-bookworm AS x8build
+RUN mkdir -p /x8out/bin \
+    && (cargo install x8 --locked --root /x8out \
+        || echo "WARN: x8 build failed (upstream deps); image will ship without x8")
 
 # ---------------------------------------------------------------------------
 # Stage 2 — final Kali toolset image (arm64).
@@ -132,9 +136,9 @@ RUN curl -fsSL -o /tmp/rustscan.zip \
     && find /tmp/rustscan -type f -name 'rustscan' -exec install -m 0755 {} /usr/local/bin/rustscan \; \
     && rm -rf /tmp/rustscan /tmp/rustscan.zip
 
-# Native Go recon binaries + the x8 build.
+# Native Go recon binaries + the x8 build (x8 dir-merge so a skipped x8 is non-fatal).
 COPY --from=gobuild /out/ /usr/local/bin/
-COPY --from=x8build /usr/local/bin/x8 /usr/local/bin/x8
+COPY --from=x8build /x8out/bin/ /usr/local/bin/
 
 # Sanity check a representative tool from each install path.
 RUN nmap --version >/dev/null && msfconsole --version >/dev/null 2>&1 \
