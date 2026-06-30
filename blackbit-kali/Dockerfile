@@ -1,35 +1,35 @@
-# Blackbit Kali toolset image — lean, arm64, for the microsandbox (msb) microVM.
+# Blackbit Kali toolset image — arm64, for the microsandbox (msb) microVM.
 #
 # Why this exists: the desktop app boots a Kali microVM via the bundled `msb` and
 # runs the offensive toolchain inside it (kali_exec). The upstream
-# kalilinux/kali-rolling base is minimal (no nmap/nuclei/sqlmap), and the full
-# vxcontrol/kali-linux (~10-12 GiB) trips an msb EROFS large-image extraction bug
-# (binaries past ~4 GiB get corrupted). This image ships exactly the tools the
-# Blackbit prompt routes — and stays lean (target <4 GiB extracted) so it never
-# enters that overflow zone.
+# kalilinux/kali-rolling base is minimal; the full vxcontrol/kali-linux (~10-12
+# GiB) trips an msb EROFS large-image extraction bug (binaries past ~4 GiB get
+# corrupted). This image carries the tools the Blackbit agent actually uses while
+# staying under ~4 GiB extracted so it never enters that overflow zone.
+#
+# Deliberately NOT preinstalled (they alone would push past 4 GiB): the giant DATA
+# sets `seclists` (~1.3 GiB) and `exploitdb`/`searchsploit` (~2 GiB). They are
+# runtime-installable inside the persistent microVM — `apt-get install -y seclists
+# exploitdb` — and state survives for the session.
 #
 # Build (arm64 ONLY — libkrun runs the guest natively, no x86 emulation):
-#   docker build --platform=linux/arm64 -t <registry>/blackbit-kali:<tag> .
-#
-# Tooling parity: the Go module paths + cargo crates mirror
-# packages/desktop/scripts/download-blackbit-tools.ts exactly.
+#   docker build --platform=linux/arm64 -t <registry>/blackbit-kali:lean .
 
 # ---------------------------------------------------------------------------
-# Stage 1 — build the native Go/Rust recon tools from source (arm64).
+# Stage 1 — build the native Go recon tools from source (arm64).
+# Module paths mirror packages/desktop/scripts/download-blackbit-tools.ts.
 # ---------------------------------------------------------------------------
 FROM golang:1.25-bookworm AS gobuild
 
-# libpcap-dev: naabu (and other PD tools) need it for the CGO build.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git ca-certificates build-essential libpcap-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# GOTOOLCHAIN=auto lets `go install` fetch a newer toolchain when a tool's
-# go.mod requires one (e.g. nuclei needs go >= 1.25.7).
+# GOTOOLCHAIN=auto lets `go install` fetch a newer toolchain when a tool's go.mod
+# requires one (e.g. nuclei needs go >= 1.25.7). libpcap-dev: naabu CGO build.
 ENV CGO_ENABLED=1 GOBIN=/out GOFLAGS=-trimpath GOTOOLCHAIN=auto
 RUN mkdir -p /out
 
-# ProjectDiscovery recon/scan suite (exact module paths from download-blackbit-tools.ts).
 RUN go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
  && go install github.com/projectdiscovery/httpx/cmd/httpx@latest \
  && go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest \
@@ -44,7 +44,6 @@ RUN go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
  && go install github.com/projectdiscovery/cloudlist/cmd/cloudlist@latest \
  && go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest
 
-# Other Go recon/fuzz tools (release + gobuild strategies in the host stager).
 RUN go install github.com/ffuf/ffuf/v2@latest \
  && go install github.com/hahwul/dalfox/v2@latest \
  && go install github.com/sensepost/gowitness@latest \
@@ -52,7 +51,6 @@ RUN go install github.com/ffuf/ffuf/v2@latest \
  && go install github.com/lc/gau/v2/cmd/gau@latest \
  && go install github.com/OJ/gobuster/v3@latest
 
-# tomnomnom-style chain + misc gobuild tools.
 RUN go install github.com/tomnomnom/assetfinder@latest \
  && go install github.com/tomnomnom/httprobe@latest \
  && go install github.com/tomnomnom/meg@latest \
@@ -72,39 +70,47 @@ RUN go install github.com/tomnomnom/assetfinder@latest \
 
 # ---------------------------------------------------------------------------
 # Stage 2 — final Kali toolset image (arm64).
-# feroxbuster comes from Kali apt (no slow cargo build). rustscan and x8 are
-# omitted: neither is packaged in Kali, and x8's upstream cargo build is broken on
-# current rustc (time/cookie crate). rustscan is a thin nmap front-end (nmap/naabu
-# cover scanning) and x8 is a minor hidden-parameter fuzzer — acceptable to skip.
 # ---------------------------------------------------------------------------
 FROM kalilinux/kali-rolling
 
-# Keep it lean: no recommends, drop apt lists. These are the apt-provided
-# exploitation/auth tools + the execBackground hard-deps (bash, screen,
-# coreutils=stdbuf/base64) + runtime libs (libpcap for naabu/nmap).
+# apt: the Blackbit kali_exec toolset. --no-install-recommends + doc-strip to stay
+# lean. metasploit-framework is the heaviest single package kept; the giant data
+# sets (seclists/exploitdb) are left out and installed at runtime if needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash coreutils screen ca-certificates curl wget git openssl \
-      libpcap0.8 \
-      python3 python3-pip \
-      nmap \
-      sqlmap \
-      nikto \
-      whatweb \
-      wpscan \
-      hydra \
-      john \
-      dnsutils \
-      netexec \
-      impacket-scripts \
-      feroxbuster \
-      dirb \
+      bash coreutils screen ca-certificates curl wget git openssl libpcap0.8 \
+      python3 python3-pip default-jre-headless dnsutils \
+      nmap masscan tcpdump \
+      sqlmap commix dirsearch wfuzz nikto whatweb wpscan arjun wafw00f \
+      sstimap xsstrike paramspider waymore testssl.sh \
+      hydra john hashcat \
+      netexec impacket-scripts smbmap smbclient enum4linux-ng ldap-utils responder \
+      evil-winrm mimikatz certipy-ad \
+      metasploit-framework \
+      feroxbuster dirb wordlists \
+      socat proxychains4 sslscan dnsrecon theharvester sublist3r \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
     && { find /usr/share/doc -depth -type f ! -name copyright -delete 2>/dev/null || true; }
 
-# Recon binaries built from source (Go).
+# Python/git tools the Blackbit prompt routes that are NOT in Kali apt.
+# ghauri via pip; the rest cloned to /opt with a PATH wrapper.
+RUN pip3 install --break-system-packages --no-cache-dir "git+https://github.com/r0oth3x49/ghauri" \
+ && for t in "jwt_tool:ticarpi/jwt_tool:jwt_tool.py" \
+             "ssrfmap:swisskyrepo/SSRFmap:ssrfmap.py" \
+             "corsy:s0md3v/Corsy:corsy.py" \
+             "oralyzer:r0075h3ll/Oralyzer:oralyzer.py"; do \
+      name="${t%%:*}"; rest="${t#*:}"; repo="${rest%%:*}"; entry="${rest##*:}"; \
+      git clone --depth 1 "https://github.com/$repo" "/opt/$name" \
+      && if [ -f "/opt/$name/requirements.txt" ]; then \
+           pip3 install --break-system-packages --no-cache-dir -r "/opt/$name/requirements.txt" || true; \
+         fi \
+      && printf '#!/bin/sh\nexec python3 /opt/%s/%s "$@"\n' "$name" "$entry" > "/usr/local/bin/$name" \
+      && chmod +x "/usr/local/bin/$name"; \
+    done
+
+# Native Go recon binaries.
 COPY --from=gobuild /out/ /usr/local/bin/
 
-# Sanity: a couple of representative tools must resolve at build time.
-RUN nmap --version >/dev/null && nuclei -version >/dev/null 2>&1 || true
+# Sanity check a representative tool from each install path.
+RUN nmap --version >/dev/null && msfconsole --version >/dev/null 2>&1 || true
 
 CMD ["sleep", "infinity"]
