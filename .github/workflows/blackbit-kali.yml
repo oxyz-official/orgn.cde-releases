@@ -1,0 +1,33 @@
+name: blackbit-kali-image
+
+# Builds the lean Blackbit Kali toolset image (arm64) and publishes it to GHCR.
+# Runs on GitHub's free hosted arm64 runner (public repo) — native build, no QEMU.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - blackbit-kali/**
+      - .github/workflows/blackbit-kali.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Build and push (linux/arm64)
+        run: |
+          IMG=ghcr.io/oxyz-official/blackbit-kali
+          docker build --platform=linux/arm64 \
+            --label org.opencontainers.image.source=https://github.com/oxyz-official/orgn.cde-releases \
+            -t "$IMG:lean" -t "$IMG:latest" blackbit-kali
+          docker push "$IMG:lean"
+          docker push "$IMG:latest"
+          echo "### Published" >> "$GITHUB_STEP_SUMMARY"
+          docker inspect --format='`{{index .RepoDigests 0}}`' "$IMG:lean" >> "$GITHUB_STEP_SUMMARY"
