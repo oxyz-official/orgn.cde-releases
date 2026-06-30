@@ -108,6 +108,14 @@ RUN pip3 install --break-system-packages --no-cache-dir "git+https://github.com/
       && chmod +x "/usr/local/bin/$name"; \
     done
 
+# SecLists in its own layer (keeps total ~3.5 GiB, under the EROFS ceiling, and
+# isolates this large data set into a single <4 GiB blob). The agent's deep-recon
+# mode depends on medium/large SecLists at /usr/share/seclists. exploit-db is
+# deliberately NOT baked in — it's ~2 GiB, ages quickly, and is runtime-installable
+# (`apt-get install -y exploitdb`) when an exploitation task needs searchsploit.
+RUN apt-get update && apt-get install -y --no-install-recommends seclists \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
 # Native Go recon binaries.
 COPY --from=gobuild /out/ /usr/local/bin/
 
