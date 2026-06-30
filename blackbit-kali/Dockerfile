@@ -97,6 +97,7 @@ RUN pip3 install --break-system-packages --no-cache-dir "git+https://github.com/
  && for t in "jwt_tool:ticarpi/jwt_tool:jwt_tool.py" \
              "ssrfmap:swisskyrepo/SSRFmap:ssrfmap.py" \
              "corsy:s0md3v/Corsy:corsy.py" \
+             "smuggler:defparam/smuggler:smuggler.py" \
              "oralyzer:r0075h3ll/Oralyzer:oralyzer.py"; do \
       name="${t%%:*}"; rest="${t#*:}"; repo="${rest%%:*}"; entry="${rest##*:}"; \
       git clone --depth 1 "https://github.com/$repo" "/opt/$name" \
