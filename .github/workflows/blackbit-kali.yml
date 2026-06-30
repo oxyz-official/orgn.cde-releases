@@ -1,26 +1,20 @@
 name: blackbit-kali-image
 
-# Builds the lean Blackbit Kali toolset image (arm64) and publishes it to GHCR.
-# Runs on GitHub's free hosted arm64 runner (public repo) — native build, no QEMU.
+# Builds the Blackbit Kali toolset image (arm64) and publishes it to GHCR.
+# Uses a PAT secret GHCR_PAT (write:packages) — the enterprise disables write
+# permissions for the default GITHUB_TOKEN, so a user PAT is required to push.
+# Dispatch-only so editing this file doesn't kick off a build before the secret
+# is set: run via `gh workflow run blackbit-kali-image` or the Actions UI.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - blackbit-kali/**
-      - .github/workflows/blackbit-kali.yml
-
-permissions:
-  contents: read
-  packages: write
 
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - name: Log in to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Log in to GHCR (PAT)
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u oxyz-official --password-stdin
       - name: Build and push (linux/arm64)
         run: |
           IMG=ghcr.io/oxyz-official/blackbit-kali
