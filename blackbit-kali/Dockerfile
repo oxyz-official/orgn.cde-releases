@@ -69,6 +69,14 @@ RUN go install github.com/tomnomnom/assetfinder@latest \
  && go install github.com/ropnop/kerbrute@latest
 
 # ---------------------------------------------------------------------------
+# Stage 1b — build x8 (hidden-parameter discovery). No arm64 prebuilt binary is
+# published, and a plain `cargo install x8` breaks (cookie/time dependency
+# resolution). `--locked` uses x8's own Cargo.lock, which pins compatible deps.
+# ---------------------------------------------------------------------------
+FROM rust:1-bookworm AS x8build
+RUN cargo install x8 --locked --root /usr/local
+
+# ---------------------------------------------------------------------------
 # Stage 2 — final Kali toolset image (arm64).
 # ---------------------------------------------------------------------------
 FROM kalilinux/kali-rolling
@@ -77,7 +85,7 @@ FROM kalilinux/kali-rolling
 # lean. metasploit-framework is the heaviest single package kept; the giant data
 # sets (seclists/exploitdb) are left out and installed at runtime if needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      bash coreutils screen ca-certificates curl wget git openssl libpcap0.8 \
+      bash coreutils screen ca-certificates curl wget git unzip openssl libpcap0.8 \
       python3 python3-pip default-jre-headless dnsutils \
       nmap masscan tcpdump \
       sqlmap commix dirsearch wfuzz nikto whatweb wpscan arjun wafw00f \
@@ -116,10 +124,20 @@ RUN pip3 install --break-system-packages --no-cache-dir "git+https://github.com/
 RUN apt-get update && apt-get install -y --no-install-recommends seclists \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
-# Native Go recon binaries.
+# rustscan — fast port discovery. Not in Kali apt; use the published aarch64-linux
+# prebuilt binary.
+RUN curl -fsSL -o /tmp/rustscan.zip \
+      https://github.com/bee-san/RustScan/releases/download/2.4.1/aarch64-linux-rustscan.zip \
+    && unzip -o /tmp/rustscan.zip -d /tmp/rustscan \
+    && find /tmp/rustscan -type f -name 'rustscan' -exec install -m 0755 {} /usr/local/bin/rustscan \; \
+    && rm -rf /tmp/rustscan /tmp/rustscan.zip
+
+# Native Go recon binaries + the x8 build.
 COPY --from=gobuild /out/ /usr/local/bin/
+COPY --from=x8build /usr/local/bin/x8 /usr/local/bin/x8
 
 # Sanity check a representative tool from each install path.
-RUN nmap --version >/dev/null && msfconsole --version >/dev/null 2>&1 || true
+RUN nmap --version >/dev/null && msfconsole --version >/dev/null 2>&1 \
+    && rustscan --version >/dev/null && x8 --version >/dev/null 2>&1 || true
 
 CMD ["sleep", "infinity"]
