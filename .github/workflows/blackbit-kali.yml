@@ -1,10 +1,21 @@
 name: blackbit-kali-image
 
-# Builds the Blackbit Kali toolset image (arm64) and publishes it to GHCR.
-# Uses a PAT secret GHCR_PAT (write:packages) — the enterprise disables write
-# permissions for the default GITHUB_TOKEN, so a user PAT is required to push.
-# Dispatch-only so editing this file doesn't kick off a build before the secret
-# is set: run via `gh workflow run blackbit-kali-image` or the Actions UI.
+# Builds the Blackbit Kali toolset image (arm64) and publishes it to BOTH
+# Docker Hub (orgncde/blackbit-kali — the app's primary pull source; its AWS
+# CloudFront blob CDN has edge PoPs across EMEA/Africa, so pulls there are ~2-3x
+# faster than GHCR's centralized Azure blob storage) and GHCR (fallback).
+#
+# The SAME built image is pushed to both, so the content-addressed digest is
+# identical across registries and either ref can be pinned interchangeably in the
+# app (server.ts + the two kali-container.ts files).
+#
+# Secrets:
+#   GHCR_PAT        — write:packages PAT (the enterprise disables the default
+#                     GITHUB_TOKEN package-write permission, so a PAT is required)
+#   DOCKERHUB_TOKEN — Docker Hub access token for the `orgncde` account (Read/Write)
+#
+# Dispatch-only so editing this file doesn't kick off a build before the secrets
+# are set: run via `gh workflow run blackbit-kali-image` or the Actions UI.
 on:
   workflow_dispatch:
 
@@ -13,15 +24,26 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login docker.io -u orgncde --password-stdin
       - name: Log in to GHCR (PAT)
         run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u oxyz-official --password-stdin
-      - name: Build and push (linux/arm64)
+      - name: Build once, push to Docker Hub + GHCR (linux/arm64)
         run: |
-          IMG=ghcr.io/oxyz-official/blackbit-kali
+          HUB=docker.io/orgncde/blackbit-kali
+          GHCR=ghcr.io/oxyz-official/blackbit-kali
           docker build --platform=linux/arm64 \
             --label org.opencontainers.image.source=https://github.com/oxyz-official/orgn.cde-releases \
-            -t "$IMG:lean" -t "$IMG:latest" blackbit-kali
-          docker push "$IMG:lean"
-          docker push "$IMG:latest"
-          echo "### Published" >> "$GITHUB_STEP_SUMMARY"
-          docker inspect --format='`{{index .RepoDigests 0}}`' "$IMG:lean" >> "$GITHUB_STEP_SUMMARY"
+            -t "$HUB:lean" -t "$HUB:latest" \
+            -t "$GHCR:lean" -t "$GHCR:latest" \
+            blackbit-kali
+          docker push "$HUB:lean"
+          docker push "$HUB:latest"
+          docker push "$GHCR:lean"
+          docker push "$GHCR:latest"
+          {
+            echo "### Published — identical digest to both registries"
+            echo "Re-pin this digest in orgn.cde: KALI_IMAGE (server.ts) + DEFAULT_IMAGE (desktop & core kali-container.ts)."
+            echo ""
+            docker inspect --format='{{range .RepoDigests}}- `{{println .}}`{{end}}' "$HUB:lean"
+          } >> "$GITHUB_STEP_SUMMARY"

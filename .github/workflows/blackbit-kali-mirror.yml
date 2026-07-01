@@ -1,0 +1,46 @@
+name: blackbit-kali-mirror
+
+# On-demand: copy an EXISTING blackbit-kali image from GHCR to Docker Hub,
+# preserving the exact digest. crane does a byte-for-byte manifest copy (no
+# rebuild), so the app can keep its current @sha256 pin and just switch the
+# registry host in the ref. Use this for the initial GHCR -> Docker Hub cutover;
+# routine rebuilds use the blackbit-kali-image workflow (which dual-pushes).
+#
+# Secrets: GHCR_PAT (read:packages), DOCKERHUB_TOKEN (orgncde account, Read/Write).
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "GHCR image digest to mirror (sha256:…) — defaults to the digest the app currently pins"
+        required: true
+        default: "sha256:36dd55f1207bac701cda6e352dc6dc762e918c187d012a6badf5b51a554c2d17"
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install crane
+        run: |
+          curl -sL https://github.com/google/go-containerregistry/releases/latest/download/go-containerregistry_Linux_x86_64.tar.gz \
+            | tar -xz crane
+          sudo mv crane /usr/local/bin/crane
+          crane version
+      - name: Copy GHCR -> Docker Hub (preserves digest)
+        run: |
+          crane auth login ghcr.io   -u oxyz-official -p "${{ secrets.GHCR_PAT }}"
+          crane auth login docker.io -u orgncde       -p "${{ secrets.DOCKERHUB_TOKEN }}"
+          SRC="ghcr.io/oxyz-official/blackbit-kali@${{ inputs.digest }}"
+          crane copy "$SRC" docker.io/orgncde/blackbit-kali:lean
+          crane copy "$SRC" docker.io/orgncde/blackbit-kali:latest
+          OUT="$(crane digest docker.io/orgncde/blackbit-kali:lean)"
+          {
+            echo "### Mirrored to Docker Hub"
+            echo "- source: \`$SRC\`"
+            echo "- docker.io/orgncde/blackbit-kali:lean → \`$OUT\`"
+            echo ""
+            if [ "$OUT" = "${{ inputs.digest }}" ]; then
+              echo "Digest preserved ✅ — the app's existing pin is now valid on Docker Hub."
+            else
+              echo "⚠️ Digest changed — re-pin the app to \`$OUT\` instead."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
