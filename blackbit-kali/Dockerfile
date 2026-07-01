@@ -133,7 +133,10 @@ RUN curl -L https://foundry.paradigm.xyz | bash \
 # slither requires Python 3.10+ (kali-rolling ships a recent python3) and a solc on PATH;
 # solc-select manages versions per-project. Pre-install the handful of versions audits most
 # commonly target so a fresh engagement doesn't need a network fetch mid-run.
-RUN pip3 install --break-system-packages --no-cache-dir slither-analyzer solc-select \
+# --ignore-installed: slither pulls prettytable→wcwidth, and pip would try to uninstall
+# Kali's Debian-provided wcwidth (no RECORD file → "uninstall-no-record-file", which aborts
+# the build). Skipping the uninstall lays down a clean pip-managed copy instead of failing.
+RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed slither-analyzer solc-select \
  && solc-select install 0.8.30 0.8.20 0.8.19 0.8.0 \
  && solc-select use 0.8.20
 
