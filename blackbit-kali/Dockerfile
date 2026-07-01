@@ -120,6 +120,23 @@ RUN pip3 install --break-system-packages --no-cache-dir "git+https://github.com/
       && chmod +x "/usr/local/bin/$name"; \
     done
 
+# Foundry (forge/cast/anvil) + Slither/solc-select — the proof bar for smart-contract findings
+# (blackbit-web3-scope.txt): a Solidity finding is `confirmed` only with a passing `forge test`,
+# never source-code narration alone. ~150-250 MiB combined; small relative to the seclists/
+# metasploit budget already spent below. foundryup --arch arm64 is explicit since this image is
+# arm64-only (see header comment) and the installer otherwise infers arch from `uname -m`, which
+# can be wrong under QEMU/emulated build environments.
+RUN curl -L https://foundry.paradigm.xyz | bash \
+ && /root/.foundry/bin/foundryup --arch arm64 \
+ && ln -sf /root/.foundry/bin/forge /root/.foundry/bin/cast /root/.foundry/bin/anvil /root/.foundry/bin/chisel /usr/local/bin/
+
+# slither requires Python 3.10+ (kali-rolling ships a recent python3) and a solc on PATH;
+# solc-select manages versions per-project. Pre-install the handful of versions audits most
+# commonly target so a fresh engagement doesn't need a network fetch mid-run.
+RUN pip3 install --break-system-packages --no-cache-dir slither-analyzer solc-select \
+ && solc-select install 0.8.30 0.8.20 0.8.19 0.8.0 \
+ && solc-select use 0.8.20
+
 # SecLists in its own layer (keeps total ~3.5 GiB, under the EROFS ceiling, and
 # isolates this large data set into a single <4 GiB blob). The agent's deep-recon
 # mode depends on medium/large SecLists at /usr/share/seclists. exploit-db is
@@ -142,6 +159,7 @@ COPY --from=x8build /x8out/bin/ /usr/local/bin/
 
 # Sanity check a representative tool from each install path.
 RUN nmap --version >/dev/null && msfconsole --version >/dev/null 2>&1 \
-    && rustscan --version >/dev/null && x8 --version >/dev/null 2>&1 || true
+    && rustscan --version >/dev/null && x8 --version >/dev/null 2>&1 \
+    && forge --version >/dev/null && slither --version >/dev/null 2>&1 || true
 
 CMD ["sleep", "infinity"]
